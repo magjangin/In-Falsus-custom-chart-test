@@ -46,7 +46,7 @@ namespace InFalsusMods
             {
                 ChartInjector.Tick(LoggerInstance);
                 NotePlayerProbe.Tick(LoggerInstance);
-                SceneRefs.Refresh();
+                SceneRefs.Refresh(LoggerInstance);
                 StorySkipUnlocker.Tick(LoggerInstance);
                 CharacterUnlocker.Tick(LoggerInstance);
                 JacketHook.Tick(LoggerInstance);

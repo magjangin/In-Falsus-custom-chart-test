@@ -1,4 +1,5 @@
 using System;
+using MelonLoader;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes;
 using UnityEngine;
@@ -25,6 +26,10 @@ namespace InFalsusMods
         public static StoryScene Story { get; private set; }
         public static HubScene Hub { get; private set; }
         public static CharacterSelectLayer CharacterSelect { get; private set; }
+        public static CoreScene CoreScene { get; private set; }
+        public static Camera MainCamera { get; private set; }
+
+        private static bool _loggedCameraThisPlay;
 
         /// <summary>
         /// 못 찾은(=현재 씬에 없는) 타입을 다시 뒤지는 주기. 디텍터 틱 6회 = 60프레임 ≈ 0.5초.
@@ -38,7 +43,7 @@ namespace InFalsusMods
         private static int _ticks;
 
         /// <summary>디텍터 틱마다 1회 호출. 이 안에서만 실제 씬 탐색이 일어난다.</summary>
-        public static void Refresh()
+        public static void Refresh(MelonLogger.Instance log = null)
         {
             bool retryMisses = (_ticks++ % MissRetryIntervalTicks) == 0;
 
@@ -47,6 +52,7 @@ namespace InFalsusMods
             Transition = Keep(Transition, retryMisses);
             Story = Keep(Story, retryMisses);
             Hub = Keep(Hub, retryMisses);
+            CoreScene = Keep(CoreScene, retryMisses);
 
             if (Hub != null && Hub.characterSelectLayer != null)
             {
@@ -56,6 +62,86 @@ namespace InFalsusMods
             {
                 CharacterSelect = Keep(CharacterSelect, retryMisses);
             }
+
+            // 플레이 씬(GameScene) 메인 카메라 감지
+            if (GameScene != null)
+            {
+                if ((UnityEngine.Object)MainCamera == null)
+                {
+                    MainCamera = FindMainCamera();
+                }
+
+                if ((UnityEngine.Object)MainCamera != null && !_loggedCameraThisPlay)
+                {
+                    _loggedCameraThisPlay = true;
+                    LogCameraDetails(MainCamera, log);
+                }
+            }
+            else
+            {
+                MainCamera = null;
+                _loggedCameraThisPlay = false;
+            }
+        }
+
+        private static Camera FindMainCamera()
+        {
+            try
+            {
+                // 1순위: Unity 표준 Camera.main (MainCamera 태그)
+                var cam = Camera.main;
+                if ((UnityEngine.Object)cam != null) return cam;
+
+                // 2순위: CoreScene 인스턴스에 등록된 MainCamera
+                if (CoreScene != null && (UnityEngine.Object)CoreScene.MainCamera != null)
+                {
+                    return CoreScene.MainCamera;
+                }
+
+                // 3순위: GameScene 하위의 자식 카메라
+                if (GameScene != null)
+                {
+                    var childCam = GameScene.GetComponentInChildren<Camera>();
+                    if ((UnityEngine.Object)childCam != null) return childCam;
+                }
+
+                // 4순위: 씬 내 모든 활성 카메라 중 폴백
+                var allCams = Camera.allCameras;
+                if (allCams != null && allCams.Length > 0)
+                {
+                    for (int i = 0; i < allCams.Length; i++)
+                    {
+                        var c = allCams[i];
+                        if ((UnityEngine.Object)c != null && c.isActiveAndEnabled) return c;
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private static void LogCameraDetails(Camera cam, MelonLogger.Instance log)
+        {
+            if (log == null || (UnityEngine.Object)cam == null) return;
+
+            try
+            {
+                var tr = cam.transform;
+                var pos = tr != null ? tr.position : Vector3.zero;
+                var rot = tr != null ? tr.rotation.eulerAngles : Vector3.zero;
+
+                log.Msg("══════════════════════════════════════════════════════════════════════════");
+                log.Msg($"[SceneRefs][플레이 씬 카메라 감지] MainCamera 획득 성공!");
+                log.Msg($"  ├ 오브젝트 이름: '{cam.name}' (태그: '{cam.tag}')");
+                log.Msg($"  ├ 카메라 위치(Pos): ({pos.x:F2}, {pos.y:F2}, {pos.z:F2})");
+                log.Msg($"  ├ 카메라 회전(Rot): ({rot.x:F2}, {rot.y:F2}, {rot.z:F2})");
+                log.Msg($"  ├ 직교 투영(Orthographic): {cam.orthographic} " +
+                        $"{(cam.orthographic ? $"(Size: {cam.orthographicSize:F2})" : $"(FOV: {cam.fieldOfView:F2}°)")}");
+                log.Msg($"  └ 클리핑 범위: Near {cam.nearClipPlane:F2} ~ Far {cam.farClipPlane:F2}");
+                log.Msg("══════════════════════════════════════════════════════════════════════════");
+            }
+            catch { }
         }
 
         /// <summary>살아있는 참조는 그대로 쓰고, 없을 때만(그마저도 가끔만) 다시 탐색한다.</summary>
