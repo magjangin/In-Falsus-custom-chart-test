@@ -59,5 +59,21 @@ namespace InFalsusMods
                 SongListDumper.Tick(LoggerInstance);
             }
         }
+
+        /// <summary>
+        /// MelonLoader의 씬 로드 이벤트 진입점
+        /// </summary>
+        public override void OnSceneWasLoaded(int buildIndex, string sceneName)
+        {
+            SceneRefs.OnSceneLoaded(buildIndex, sceneName, LoggerInstance);
+        }
+
+        /// <summary>
+        /// MelonLoader의 씬 초기화 완료 이벤트 진입점
+        /// </summary>
+        public override void OnSceneWasInitialized(int buildIndex, string sceneName)
+        {
+            SceneRefs.Refresh(LoggerInstance);
+        }
     }
 }

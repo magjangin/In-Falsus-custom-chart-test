@@ -29,7 +29,50 @@ namespace InFalsusMods
         public static CoreScene CoreScene { get; private set; }
         public static Camera MainCamera { get; private set; }
 
+        /// <summary>현재 활성화된 씬 이름</summary>
+        public static string CurrentSceneName { get; private set; } = "Unknown";
+
+        /// <summary>현재 활성화된 씬 빌드 인덱스</summary>
+        public static int CurrentBuildIndex { get; private set; } = -1;
+
+        /// <summary>플레이 씬 여부 (GameScene 활성 상태)</summary>
+        public static bool IsGameScene => (UnityEngine.Object)GameScene != null;
+
+        /// <summary>곡 선택 화면 여부 (SongSelectScene 활성 상태)</summary>
+        public static bool IsSongSelectScene => (UnityEngine.Object)SongSelect != null;
+
+        /// <summary>허브 화면 여부 (HubScene 활성 상태)</summary>
+        public static bool IsHubScene => (UnityEngine.Object)Hub != null;
+
+        /// <summary>스토리 화면 여부 (StoryScene 활성 상태)</summary>
+        public static bool IsStoryScene => (UnityEngine.Object)Story != null;
+
+        /// <summary>씬 변경 시 발생하는 이벤트 (buildIndex, sceneName)</summary>
+        public static event Action<int, string> OnSceneChanged;
+
         private static bool _loggedCameraThisPlay;
+
+        /// <summary>
+        /// MelonLoader의 씬 로드 콜백에서 호출되는 핵심 씬 감지 메서드입니다.
+        /// </summary>
+        public static void OnSceneLoaded(int buildIndex, string sceneName, MelonLogger.Instance log)
+        {
+            CurrentBuildIndex = buildIndex;
+            CurrentSceneName = string.IsNullOrEmpty(sceneName) ? "Unknown" : sceneName;
+
+            log?.Msg("──────────────────────────────────────────────────────────────────────────");
+            log?.Msg($"[SceneRefs][씬 감지] 씬 로드 완료: '{CurrentSceneName}' (BuildIndex: {CurrentBuildIndex})");
+            log?.Msg("──────────────────────────────────────────────────────────────────────────");
+
+            _loggedCameraThisPlay = false;
+            Refresh(log);
+
+            try
+            {
+                OnSceneChanged?.Invoke(buildIndex, CurrentSceneName);
+            }
+            catch { }
+        }
 
         /// <summary>
         /// 못 찾은(=현재 씬에 없는) 타입을 다시 뒤지는 주기. 디텍터 틱 6회 = 60프레임 ≈ 0.5초.
