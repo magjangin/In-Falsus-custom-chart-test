@@ -52,6 +52,35 @@ namespace InFalsusMods
 
         private static bool _loggedCameraThisPlay;
 
+        private static readonly System.Collections.Generic.Dictionary<string, string> KnownSceneNames =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                { "91ffe1a657cc84028b64801a0ec8efef", "CoreScene" },
+                { "474880cd7737afe4e9758f1a75e48a7b", "HubScene" },
+                { "51299cded558992458e26ef3c54713de", "CharacterSelectScene" },
+                { "13572b4fe2a8a2346a4acee3c29ad5ea", "SongSelectScene" },
+                { "2e7ae588d8f524047bc76ff9c214696a", "ResultsScene" },
+                { "986f79fbb15418b48a813f0a31cbc6cc", "TimelineScene" },
+                { "68f68491d98d243489a916de6ed67fb5", "StorySongTransitionScene" },
+                { "6bd44d7524f1de344b750c1782dba00b", "ThanksForPlayingScene" },
+                { "a202c27eb034d48749eae4255846b069", "RecipeScene" },
+            };
+
+        /// <summary>32자리 Addressables 해시명을 사람이 읽을 수 있는 씬 명칭으로 해독합니다.</summary>
+        public static string ResolveSceneName(string rawName)
+        {
+            if (string.IsNullOrEmpty(rawName)) return "Unknown";
+            if (KnownSceneNames.TryGetValue(rawName, out var friendly)) return friendly;
+
+            // 런타임 활성 컴포넌트 기반 역산
+            if (IsGameScene) return "GameScene (플레이)";
+            if (IsSongSelectScene) return "SongSelectScene (곡 선택)";
+            if (IsHubScene) return "HubScene (메인 허브)";
+            if (IsStoryScene) return "StoryScene (스토리)";
+
+            return rawName;
+        }
+
         /// <summary>
         /// MelonLoader의 씬 로드 콜백에서 호출되는 핵심 씬 감지 메서드입니다.
         /// </summary>
@@ -60,8 +89,13 @@ namespace InFalsusMods
             CurrentBuildIndex = buildIndex;
             CurrentSceneName = string.IsNullOrEmpty(sceneName) ? "Unknown" : sceneName;
 
+            string friendlyName = ResolveSceneName(CurrentSceneName);
+            string nameDisplay = friendlyName != CurrentSceneName
+                ? $"'{CurrentSceneName}' (해독: {friendlyName})"
+                : $"'{CurrentSceneName}'";
+
             log?.Msg("──────────────────────────────────────────────────────────────────────────");
-            log?.Msg($"[SceneRefs][씬 감지] 씬 로드 완료: '{CurrentSceneName}' (BuildIndex: {CurrentBuildIndex})");
+            log?.Msg($"[SceneRefs][씬 감지] 씬 로드 완료: {nameDisplay} (BuildIndex: {CurrentBuildIndex})");
             log?.Msg("──────────────────────────────────────────────────────────────────────────");
 
             _loggedCameraThisPlay = false;
