@@ -1,0 +1,25 @@
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+**/bin/
+**/obj/
+
+# Il2Cpp Dumps & Temporary Decompiled files (too large for git)
+Decompiled/
+Decompiled_Audio/
+Decompiled_Full/
+scratch/
+
+# Logs & temp files
+*.log
+*.tmp
+*.bak
+*.swp

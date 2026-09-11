@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="In Falsus mods/In Falsus mods.csproj" />
+  <Project Path="SignatureDumper/SignatureDumper.csproj" />
+</Solution>

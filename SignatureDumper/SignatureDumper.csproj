@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net472;net8.0</TargetFrameworks>
+    <RootNamespace>SignatureDumper</RootNamespace>
+    <AssemblyName>SignatureDumper</AssemblyName>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="**\*.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="SignatureDumper.cs" />
+  </ItemGroup>
+</Project>

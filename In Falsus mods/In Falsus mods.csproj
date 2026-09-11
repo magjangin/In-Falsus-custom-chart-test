@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>InFalsusMods</AssemblyName>
+    <RootNamespace>InFalsusMods</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Properties\AssemblyInfo.cs 를 그대로 쓰기 위해 자동 생성 끔 -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Il2CppInterop 생성 어셈블리는 XML 문서가 없어 경고가 쏟아짐 -->
+    <NoWarn>$(NoWarn);CS0649;CS0169</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == ''">H:\steam\steamapps\common\In Falsus</GameDir>
+    <MlDir>$(GameDir)\MelonLoader\net6</MlDir>
+    <Il2CppDir>$(GameDir)\MelonLoader\Il2CppAssemblies</Il2CppDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- MelonLoader 런타임 -->
+    <Reference Include="MelonLoader">
+      <HintPath>$(MlDir)\MelonLoader.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(MlDir)\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Common">
+      <HintPath>$(MlDir)\Il2CppInterop.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(MlDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Il2Cpp 인터롭 어셈블리 -->
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(Il2CppDir)\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(Il2CppDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppGame">
+      <HintPath>$(Il2CppDir)\Il2CppGame.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppGame.Data">
+      <HintPath>$(Il2CppDir)\Il2CppGame.Data.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppGame.Common">
+      <HintPath>$(Il2CppDir)\Il2CppGame.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppGame.NovelEngine">
+      <HintPath>$(Il2CppDir)\Il2CppGame.NovelEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppGame.Input">
+      <HintPath>$(Il2CppDir)\Il2CppGame.Input.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppGame.UI.Common">
+      <HintPath>$(Il2CppDir)\Il2CppGame.UI.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppGame.Audio">
+      <HintPath>$(Il2CppDir)\Il2CppGame.Audio.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(Il2CppDir)\UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppFastText">
+      <HintPath>$(Il2CppDir)\Il2CppFastText.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 빌드하면 게임 Mods 폴더로 바로 복사 (게임 폴더가 있을 때만) -->
+  <Target Name="CopyToGameMods" AfterTargets="Build" Condition="Exists('$(GameDir)\MelonLoader')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\Mods" />
+    <Message Importance="high" Text="[InFalsusMods] -> $(GameDir)\Mods\$(TargetFileName)" />
+  </Target>
+
+</Project>
