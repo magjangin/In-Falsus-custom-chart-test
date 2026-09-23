@@ -36,6 +36,7 @@ namespace InFalsusMods
             JacketHook.Init(HarmonyInstance, LoggerInstance);
             BgmHook.Init(HarmonyInstance, LoggerInstance);
             AudioInjector.Init(HarmonyInstance, LoggerInstance);
+            JacketInjector.Init(HarmonyInstance, LoggerInstance);
         }
 
         public override void OnUpdate()
@@ -53,6 +54,7 @@ namespace InFalsusMods
                 JacketHook.Tick(LoggerInstance);
                 BgmHook.Tick(LoggerInstance);
                 AudioInjector.Tick(LoggerInstance);
+                JacketInjector.Tick(LoggerInstance);
                 FmodProbe.Tick(LoggerInstance);
             }
 

@@ -85,6 +85,10 @@
       <HintPath>$(Il2CppDir)\UnityEngine.AudioModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(Il2CppDir)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Il2CppFastText">
       <HintPath>$(Il2CppDir)\Il2CppFastText.dll</HintPath>
       <Private>false</Private>
