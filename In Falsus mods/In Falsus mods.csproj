@@ -10,6 +10,7 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <!-- Il2CppInterop 생성 어셈블리는 XML 문서가 없어 경고가 쏟아짐 -->
     <NoWarn>$(NoWarn);CS0649;CS0169</NoWarn>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -76,6 +77,10 @@
       <HintPath>$(Il2CppDir)\Il2CppGame.Audio.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Il2CppFMODUnity">
+      <HintPath>$(Il2CppDir)\Il2CppFMODUnity.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.AudioModule">
       <HintPath>$(Il2CppDir)\UnityEngine.AudioModule.dll</HintPath>
       <Private>false</Private>
@@ -89,7 +94,7 @@
   <!-- 빌드하면 게임 Mods 폴더로 바로 복사 (게임 폴더가 있을 때만) -->
   <Target Name="CopyToGameMods" AfterTargets="Build" Condition="Exists('$(GameDir)\MelonLoader')">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\Mods" />
-    <Message Importance="high" Text="[InFalsusMods] -> $(GameDir)\Mods\$(TargetFileName)" />
+    <Message Importance="high" Text="[InFalsusMods] -&gt; $(GameDir)\Mods\$(TargetFileName)" />
   </Target>
 
 </Project>

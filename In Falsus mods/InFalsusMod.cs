@@ -44,13 +44,14 @@ namespace InFalsusMods
             // 10프레임 주기(약 6Hz): 상태 감지 및 인게임 차트/스토리/오디오/UI 틱
             if (_frames % DetectorIntervalFrames == 0)
             {
-                ChartInjector.Tick(LoggerInstance);
-                NotePlayerProbe.Tick(LoggerInstance);
                 SceneRefs.Refresh(LoggerInstance);
+                ChartInjector.Tick(LoggerInstance);
+                NoteListDumper.Tick(LoggerInstance);
                 StorySkipUnlocker.Tick(LoggerInstance);
                 CharacterUnlocker.Tick(LoggerInstance);
                 JacketHook.Tick(LoggerInstance);
                 BgmHook.Tick(LoggerInstance);
+                FmodProbe.Tick(LoggerInstance);
             }
 
             // 30프레임 주기(약 2Hz): 무거운 폴링 (곡 목록 덤프)

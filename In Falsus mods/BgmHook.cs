@@ -76,7 +76,7 @@ namespace InFalsusMods
             return $"{guid} (미매핑)";
         }
 
-        private static string GetSongTitle(DataAccess dataAccess, int songId)
+        private static SongInfo GetSongInfo(DataAccess dataAccess, int songId)
         {
             try
             {
@@ -88,14 +88,20 @@ namespace InFalsusMods
                         var s = allSongs[i];
                         if (s != null && s.Id.Value == songId)
                         {
-                            return s.BaseName ?? $"Song_{songId}";
+                            return s;
                         }
                     }
                 }
             }
             catch { }
 
-            return $"Song_{songId}";
+            return null;
+        }
+
+        private static string GetSongTitle(DataAccess dataAccess, int songId)
+        {
+            var info = GetSongInfo(dataAccess, songId);
+            return info?.BaseName ?? $"Song_{songId}";
         }
 
         /// <summary>
@@ -140,15 +146,19 @@ namespace InFalsusMods
                     _lastPreviewClipName = clipName;
                     _lastPreviewSongId = currentSongId;
 
-                    string songTitle = GetSongTitle(selectScene.dataAccess, currentSongId);
-                    float startSec = selectScene._wr != null ? selectScene._wr.PreviewStartSeconds : 0f;
-                    float endSec = selectScene._wr != null ? selectScene._wr.PreviewEndSeconds : 0f;
+                    var songInfo = GetSongInfo(selectScene.dataAccess, currentSongId);
+                    string songTitle = songInfo?.BaseName ?? $"Song_{currentSongId}";
+                    float startSec = songInfo != null ? songInfo.PreviewStartSeconds : 0f;
+                    float endSec = songInfo != null ? songInfo.PreviewEndSeconds : 0f;
 
                     logger.Msg("──────────────────────────────────────────────────────────────────────────");
                     logger.Msg($"[BgmHook][곡 목록 프리뷰 감지] 곡: '{songTitle}' (Id: {currentSongId})");
                     logger.Msg($"  └ BGM 파일/클립: {ResolveClipName(clipName)}");
-                    logger.Msg($"  └ 프리뷰 구간: {startSec:F2}초 ~ {endSec:F2}초 (오프셋: {selectScene._Vr:F2}초)");
-                    logger.Msg($"  └ 핸들 Duration: {previewHandle._VUA:F2}초");
+                    if (startSec > 0f || endSec > 0f)
+                    {
+                        logger.Msg($"  └ 프리뷰 구간: {startSec:F2}초 ~ {endSec:F2}초");
+                    }
+                    logger.Msg($"  └ 오디오 스트림: {previewHandle._VUA:N0} 샘플 (AssetId: {previewHandle._SUA})");
                     logger.Msg("──────────────────────────────────────────────────────────────────────────");
                 }
             }
@@ -175,7 +185,7 @@ namespace InFalsusMods
 
             EnsureMappingLoaded(gameScene.dataAccess);
 
-            // _activePlayBgmHandle이 GameScene._dK 후킹을 통해 주입되었거나 감지되었을 때
+            // _activePlayBgmHandle이 GameScene._IK 후킹을 통해 주입되었거나 감지되었을 때
             if (_activePlayBgmHandle != null && !_isPlayingSceneBgm)
             {
                 string bgmName = _activePlayBgmHandle._d;
@@ -226,7 +236,20 @@ namespace InFalsusMods
                     int songId = __instance._sr.Value;
                     string songTitle = GetSongTitle(__instance.dataAccess, songId);
 
-                    _logger?.Msg($"[BgmHook][Hook:SongSelect._co] 프리뷰 오디오 로드 완료: '{songTitle}' (클립: {ResolveClipName(clipName)}, Id: {songId})");
+                    IntPtr fmodSoundPtr = __0._A;
+                    IntPtr fmodChannelPtr = __0._b;
+
+                    _logger?.Msg("──────────────────────────────────────────────────────────────────────────");
+                    _logger?.Msg($"[BgmHook][Hook:SongSelect._co] 프리뷰 FMOD 사운드 로드 확인!");
+                    _logger?.Msg($"  ├ 곡: '{songTitle}' (Id: {songId})");
+                    _logger?.Msg($"  ├ 클립: {ResolveClipName(clipName)} (AssetId: {__0._SUA})");
+                    _logger?.Msg($"  ├ 네이티브 FMOD::Sound* 핸들: 0x{fmodSoundPtr.ToInt64():X}");
+                    if (fmodChannelPtr != IntPtr.Zero)
+                    {
+                        _logger?.Msg($"  ├ 네이티브 FMOD::Channel* 핸들: 0x{fmodChannelPtr.ToInt64():X}");
+                    }
+                    _logger?.Msg($"  └ 오디오 스트림 크기: {__0._VUA:N0} 샘플");
+                    _logger?.Msg("──────────────────────────────────────────────────────────────────────────");
                 }
                 catch (Exception ex)
                 {
@@ -236,10 +259,12 @@ namespace InFalsusMods
         }
 
         /// <summary>
-        /// [후킹 2] 플레이 씬(GameScene)에서 메인 BGM 오디오 객체가 로드되는 시점 (_dK)
+        /// [후킹 2] 플레이 씬(GameScene)에서 메인 BGM 오디오 객체가 로드되는 시점 (_IK)
         /// 게임이 씬 시작 시 실제 곡 BGM(_Cg)을 넘겨받는 핵심 메서드입니다.
+        /// 1.0.3 까지는 _dK 였다. 1.0.4b 에서 GameScene 안에 _Cg 를 받는 메서드가 _IK 하나뿐이고
+        /// 위치(클래스 맨 끝)도 같아서 이름만 바뀐 것으로 본다.
         /// </summary>
-        [HarmonyPatch(typeof(GameScene), nameof(GameScene._dK))]
+        [HarmonyPatch(typeof(GameScene), nameof(GameScene._IK))]
         private static class Patch_GameScene_LoadBgm
         {
             [HarmonyPostfix]
@@ -253,12 +278,17 @@ namespace InFalsusMods
 
                     _activePlayBgmHandle = __0;
                     string clipName = __0._d;
-                    _logger?.Msg($"[BgmHook][Hook:GameScene._dK] 플레이 씬 메인 BGM 로드 완료: {ResolveClipName(clipName)} " +
-                                 $"(AssetId: {__0._SUA}, 길이 _VUA: {__0._VUA:N0} — 단위 미확정)");
+                    IntPtr fmodSoundPtr = __0._A;
+                    _logger?.Msg("──────────────────────────────────────────────────────────────────────────");
+                    _logger?.Msg($"[BgmHook][Hook:GameScene._IK] 플레이 씬 메인 BGM 로드 완료 (FMOD)");
+                    _logger?.Msg($"  ├ 클립: {ResolveClipName(clipName)} (AssetId: {__0._SUA})");
+                    _logger?.Msg($"  ├ 네이티브 FMOD::Sound* 핸들: 0x{fmodSoundPtr.ToInt64():X}");
+                    _logger?.Msg($"  └ 오디오 스트림 크기: {__0._VUA:N0} 샘플");
+                    _logger?.Msg("──────────────────────────────────────────────────────────────────────────");
                 }
                 catch (Exception ex)
                 {
-                    _logger?.Error($"[BgmHook][Hook:GameScene._dK] 예외 발생: {ex}");
+                    _logger?.Error($"[BgmHook][Hook:GameScene._IK] 예외 발생: {ex}");
                 }
             }
         }
