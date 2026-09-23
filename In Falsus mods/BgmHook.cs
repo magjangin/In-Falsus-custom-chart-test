@@ -169,6 +169,9 @@ namespace InFalsusMods
         private static _Cg _activePlayBgmHandle = null;
         private static bool _isPlayingSceneBgm = false;
 
+        /// <summary>GameScene._IK 로 넘어온 현재 플레이 씬 BGM 핸들 (플레이 씬이 아니면 null)</summary>
+        internal static _Cg ActivePlayBgmHandle => _activePlayBgmHandle;
+
         private static void PollGameSceneBgm(MelonLogger.Instance logger)
         {
             var gameScene = SceneRefs.GameScene;

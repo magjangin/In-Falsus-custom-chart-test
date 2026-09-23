@@ -35,6 +35,7 @@ namespace InFalsusMods
             // 3. 서브시스템 초기화
             JacketHook.Init(HarmonyInstance, LoggerInstance);
             BgmHook.Init(HarmonyInstance, LoggerInstance);
+            AudioInjector.Init(HarmonyInstance, LoggerInstance);
         }
 
         public override void OnUpdate()
@@ -51,6 +52,7 @@ namespace InFalsusMods
                 CharacterUnlocker.Tick(LoggerInstance);
                 JacketHook.Tick(LoggerInstance);
                 BgmHook.Tick(LoggerInstance);
+                AudioInjector.Tick(LoggerInstance);
                 FmodProbe.Tick(LoggerInstance);
             }
 

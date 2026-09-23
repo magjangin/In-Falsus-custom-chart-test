@@ -1,6 +1,4 @@
 using System;
-using System.IO;
-using System.Runtime.InteropServices;
 using MelonLoader;
 using Il2CppFMOD;
 using Il2Cpp_J;
@@ -14,18 +12,20 @@ namespace InFalsusMods
     /// 읽을 때마다 복호화한다. 그래서 평문 OGG 를 sam/ 에 넣으면 무음이 된다(2026-09-23 A 테스트).
     /// CREATESOUNDEXINFO.ignoresetfilesystem = 1 을 주면 이 Sound 하나만 그 콜백을 건너뛰고 OS 파일 I/O 로 읽는다.
     ///
-    /// 곡 선택 화면에 들어가면 1회 재생하고, 나가면 Sound.release() 로 멈춘다.
+    /// 곡 선택 화면에 들어가면 1회 재생하고, 나가면 Sound.release() 로 멈춘다 (PlayOverlay, 지금은 꺼 둠).
     /// 1.0.4b 래퍼에는 Channel.stop 이 스트리핑돼 없지만, Sound 를 해제하면 그 소리를 틀던 채널도 멈춘다.
-    /// 게임 프리뷰와 겹쳐서 들리는 게 정상이다.
+    /// 게임 프리뷰와 겹쳐서 들리는 게 정상이다 — 2026-09-23 확인.
     ///
-    /// 덤으로 프리뷰 핸들(_Cg)과 _IF._ctA(에셋 ID → Sound 캐시로 추정)를 대조해 남긴다 (2단계 준비, 읽기 전용).
+    /// 프리뷰 핸들(_Cg)과 _IF._ctA(에셋 ID → Sound 캐시)를 대조해 남긴다 (읽기 전용).
+    /// _Cg._B 가 진짜 Sound* 이고, AudioInjector 가 주입한 Sound 면 "모드 Sound" 로 표시된다.
     /// </summary>
     internal static class FmodProbe
     {
         // 목적을 달성하면 false 로 끌 것 (docs/04 — 진단 로깅은 플래그로 남겨두기)
-        private const bool Enabled = true;
+        public static bool Enabled { get; set; } = true;
 
-        private const string FileName = "music.ogg";
+        // 1단계(겹쳐 재생)는 2026-09-23 확인 완료. 3단계(AudioInjector) 시험 소리와 섞이지 않게 끈다.
+        public static bool PlayOverlay { get; set; } = false;
 
         private static bool _broken;
         private static bool _visited;
@@ -43,7 +43,7 @@ namespace InFalsusMods
                     if (!_visited)
                     {
                         _visited = true;   // 실패해도 이번 방문에서는 재시도하지 않는다
-                        Play(logger);
+                        if (PlayOverlay) Play(logger);
                     }
                     ProbePreviewHandle(logger);
                 }
@@ -63,41 +63,10 @@ namespace InFalsusMods
 
         private static void Play(MelonLogger.Instance logger)
         {
-            string path = Path.Combine(HwaPaths.HwaDirectory ?? string.Empty, FileName);
-            if (!File.Exists(path))
-            {
-                logger.Warning($"[FmodProbe] 파일 없음: {path}");
-                return;
-            }
+            if (!AudioInjector.TryCreateHwaSound(logger, "[FmodProbe] 겹쳐 재생", out _sound)) return;
 
             var system = _IF._ZSA;
-            logger.Msg("──────────────────────────────────────────────────────────────────────────");
-            logger.Msg($"[FmodProbe] 게임 FMOD System 핸들: 0x{system.handle.ToInt64():X}");
-            if (!system.hasHandle())
-            {
-                logger.Error("[FmodProbe] _IF._ZSA 가 비어 있음 — FMOD 초기화 전이거나 이름이 바뀌었다");
-                return;
-            }
-
-            var exinfo = new CREATESOUNDEXINFO
-            {
-                cbsize = Marshal.SizeOf<CREATESOUNDEXINFO>(),
-                ignoresetfilesystem = 1,
-            };
-            var mode = MODE.LOOP_OFF | MODE._2D | MODE.CREATESTREAM | MODE.ACCURATETIME;
-
-            var result = system.createSound(path, mode, ref exinfo, out _sound);
-            logger.Msg($"[FmodProbe] createSound(ignoresetfilesystem=1, cbsize={exinfo.cbsize}) → {result}");
-            logger.Msg($"  ├ 파일: {path}");
-            logger.Msg($"  ├ Sound 핸들: 0x{_sound.handle.ToInt64():X}");
-            if (result != RESULT.OK) return;
-
-            if (_sound.getLength(out uint lengthMs, TIMEUNIT.MS) == RESULT.OK)
-            {
-                logger.Msg($"  ├ 길이: {lengthMs / 1000.0:F3}초");
-            }
-
-            result = system.getMasterChannelGroup(out ChannelGroup master);
+            var result = system.getMasterChannelGroup(out ChannelGroup master);
             if (result != RESULT.OK)
             {
                 logger.Error($"  └ getMasterChannelGroup 실패: {result}");
@@ -106,7 +75,6 @@ namespace InFalsusMods
 
             result = system.playSound(_sound, master, false, out Channel channel);
             logger.Msg($"  └ playSound(마스터 그룹) → {result}, Channel 핸들: 0x{channel.handle.ToInt64():X}");
-            logger.Msg("──────────────────────────────────────────────────────────────────────────");
         }
 
         private static void Stop(MelonLogger.Instance logger)
@@ -135,7 +103,7 @@ namespace InFalsusMods
             logger.Msg("──────────────────────────────────────────────────────────────────────────");
             logger.Msg($"[FmodProbe][핸들 대조] 프리뷰: {BgmHook.ResolveClipName(handle._d)}");
             logger.Msg($"  ├ _Cg: AssetId(_SUA)={assetId}, _A=0x{a.ToInt64():X}, _b=0x{handle._b.ToInt64():X}, " +
-                       $"_B=0x{handle._B.ToInt64():X}, _c={handle._c}, _D={handle._D}");
+                       $"_B=0x{handle._B.ToInt64():X}{OursMark(handle._B)}, _c={handle._c}, _D={handle._D}");
 
             var cache = _IF._ctA;
             if (cache == null)
@@ -173,12 +141,14 @@ namespace InFalsusMods
                 string length = sound.getLength(out uint ms, TIMEUNIT.MS) == RESULT.OK
                     ? $"{ms / 1000.0:F3}초"
                     : "getLength 실패";
-                logger.Msg($"  ├ _ctA[{key}] ({label}) → Sound 0x{sound.handle.ToInt64():X}, 길이 {length}");
+                logger.Msg($"  ├ _ctA[{key}] ({label}) → Sound 0x{sound.handle.ToInt64():X}{OursMark(sound.handle)}, 길이 {length}");
             }
             catch (Exception ex)
             {
                 logger.Warning($"  ├ _ctA[{key}] ({label}) 조회 실패: {ex.Message}");
             }
         }
+
+        private static string OursMark(IntPtr handle) => AudioInjector.IsOurs(handle) ? " (모드 Sound)" : string.Empty;
     }
 }
