@@ -29,7 +29,10 @@ namespace InFalsusMods
         public static CoreScene CoreScene { get; private set; }
         public static Camera MainCamera { get; private set; }
 
-        /// <summary>현재 활성화된 씬 이름</summary>
+        /// <summary>현재 활성화된 씬 원시 이름 (Addressables 32자리 GUID 또는 Unity 씬명)</summary>
+        public static string RawSceneName { get; private set; } = "Unknown";
+
+        /// <summary>현재 활성화된 씬 해독 이름 (CoreScene, SongSelectScene, GameScene 등)</summary>
         public static string CurrentSceneName { get; private set; } = "Unknown";
 
         /// <summary>현재 활성화된 씬 빌드 인덱스</summary>
@@ -87,12 +90,12 @@ namespace InFalsusMods
         public static void OnSceneLoaded(int buildIndex, string sceneName, MelonLogger.Instance log)
         {
             CurrentBuildIndex = buildIndex;
-            CurrentSceneName = string.IsNullOrEmpty(sceneName) ? "Unknown" : sceneName;
+            RawSceneName = string.IsNullOrEmpty(sceneName) ? "Unknown" : sceneName;
+            CurrentSceneName = ResolveSceneName(RawSceneName);
 
-            string friendlyName = ResolveSceneName(CurrentSceneName);
-            string nameDisplay = friendlyName != CurrentSceneName
-                ? $"'{CurrentSceneName}' (해독: {friendlyName})"
-                : $"'{CurrentSceneName}'";
+            string nameDisplay = CurrentSceneName != RawSceneName
+                ? $"'{RawSceneName}' (해독: {CurrentSceneName})"
+                : $"'{RawSceneName}'";
 
             log?.Msg("──────────────────────────────────────────────────────────────────────────");
             log?.Msg($"[SceneRefs][씬 감지] 씬 로드 완료: {nameDisplay} (BuildIndex: {CurrentBuildIndex})");

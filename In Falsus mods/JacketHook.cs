@@ -7,6 +7,7 @@ using Il2Cpp;
 using Il2CppFastText;
 using Il2Cppifapp.Game.Data;
 using Il2Cppifapp.Game.Scenes;
+using Il2Cppifapp.Game.Scenes.SongSelect;
 using Il2Cppifapp.Game.Scenes.Game.UI;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2Cppifapp.Game.UI.Common;
@@ -94,12 +95,63 @@ namespace InFalsusMods
                     _lastDifficulty = diff;
 
                     string title = GetSongTitle(scene, songId);
-                    logger.Msg($"[JacketHook][곡 목록] 선택 곡 변경: '{title}' (Id: {songId}, 난이도: {diff})");
+                    logger.Msg("══════════════════════════════════════════════════════════════════════════");
+                    logger.Msg($"[JacketHook][곡 목록] 선택 곡: '{title}' (Id: {songId}, 난이도: {diff})");
 
+                    // 1. LargeSongCard 자켓 정보
+                    var card = scene.largeSongCard;
+                    if (card != null)
+                    {
+                        var jackets = card.jackets;
+                        if (jackets != null && jackets.Length > 0)
+                        {
+                            for (int i = 0; i < jackets.Length; i++)
+                            {
+                                var j = jackets[i];
+                                if (j != null)
+                                {
+                                    var mat = j._H;
+                                    string matName = mat != null ? mat.name : "null";
+                                    string texName = mat != null && mat.mainTexture != null ? mat.mainTexture.name : "null";
+                                    string texDim = mat != null && mat.mainTexture != null ? $" ({mat.mainTexture.width}x{mat.mainTexture.height})" : "";
+                                    logger.Msg($"  ├ [선택 카드 자켓] jacket[{i}]: {j.name} (머티리얼: {matName}, 텍스처: {texName}{texDim})");
+                                }
+                            }
+                        }
+
+                        // 아티스트 표시
+                        if (card.artistNames != null && card.artistNames.Length > 0)
+                        {
+                            for (int i = 0; i < card.artistNames.Length; i++)
+                            {
+                                var an = card.artistNames[i];
+                                if (an != null)
+                                {
+                                    string artist = SafeGetText(an);
+                                    if (!string.IsNullOrEmpty(artist))
+                                    {
+                                        logger.Msg($"  ├ [아티스트 UI] artistNames[{i}]: '{artist}'");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Backing Jacket (배경 큰 자켓)
                     if (scene.backingJacket != null)
                     {
-                        logger.Msg($"[JacketHook][곡 목록] └ backingJacket 활성 상태 (Obj: {scene.backingJacket.name})");
+                        var mat = scene.backingJacketMaterial ?? scene.backingJacket._H;
+                        string matName = mat != null ? mat.name : "null";
+                        string texName = mat != null && mat.mainTexture != null ? mat.mainTexture.name : "null";
+                        string texDim = mat != null && mat.mainTexture != null ? $" ({mat.mainTexture.width}x{mat.mainTexture.height})" : "";
+                        logger.Msg($"  ├ [배경 큰 자켓] backingJacket: {scene.backingJacket.name} (머티리얼: {matName}, 텍스처: {texName}{texDim})");
                     }
+
+                    // 3. 곡 메타데이터 (SongInfo / ChartInfo) 상세 정보 출력
+                    DumpSongSelectMetadata(scene, songId, diff, logger);
+
+                    logger.Msg("══════════════════════════════════════════════════════════════════════════");
                 }
             }
             else
@@ -109,35 +161,89 @@ namespace InFalsusMods
             }
         }
 
-        private static void DetectLoadingScene(MelonLogger.Instance logger)
+        private static void DumpSongSelectMetadata(SongSelectScene scene, int songId, ChartDifficultyFlag diff, MelonLogger.Instance logger)
         {
-            var trans = SceneRefs.Transition;
-            if (trans != null)
+            try
             {
-                if (trans.gameObject.activeInHierarchy)
-                {
-                    if (!_transitionActive)
-                    {
-                        _transitionActive = true;
-                        logger.Msg("[JacketHook][로딩씬] SongTransitionLayer 진입 (곡 시작 전환)");
+                var allSongs = scene.dataAccess?.SongData?.allSongInfo;
+                if (allSongs == null) return;
 
-                        if (trans.jacket != null)
+                for (int i = 0; i < allSongs.Length; i++)
+                {
+                    var s = allSongs[i];
+                    if (s == null || s.Id.Value != songId) continue;
+
+                    logger.Msg($"  ├ [곡 메타데이터] BaseName: '{s.BaseName}', 캐릭터: {s.CharacterIdentifier}");
+                    if (s.PreviewStartSeconds > 0f || s.PreviewEndSeconds > 0f)
+                    {
+                        logger.Msg($"  ├ [프리뷰 구간] {s.PreviewStartSeconds:0.##}s ~ {s.PreviewEndSeconds:0.##}s");
+                    }
+
+                    var charts = s.ChartInfos;
+                    if (charts != null)
+                    {
+                        for (int c = 0; c < charts.Length; c++)
                         {
-                            logger.Msg($"[JacketHook][로딩씬] └ jacket 컴포넌트: {trans.jacket.name}");
-                        }
-                        if (trans.jacketTargetMaterial != null)
-                        {
-                            logger.Msg($"[JacketHook][로딩씬] └ jacketTargetMaterial: {trans.jacketTargetMaterial.name}");
-                        }
-                        if (trans.backgroundJacket != null)
-                        {
-                            logger.Msg($"[JacketHook][로딩씬] └ backgroundJacket: {trans.backgroundJacket.name}");
+                            var ci = charts[c];
+                            if (ci == null) continue;
+                            if (diff != ChartDifficultyFlag.None && ci.Difficulty != diff) continue;
+
+                            logger.Msg($"  └ [선택 난이도 차트] {ci.Difficulty} (Rating: {ci.Rating}) | 채보: '{ci.DisplayChartDesigner}', 자켓: '{ci.DisplayJacketDesigner}' (Id: {ci.Id})");
+                            return;
                         }
                     }
+                    return;
                 }
-                else
+            }
+            catch { }
+        }
+
+        private static void DetectLoadingScene(MelonLogger.Instance logger)
+        {
+            // 게임 초기 부팅 화면이거나 허브일 때는 실제 곡 로딩 전환이 아니므로 무시
+            if (string.Equals(SceneRefs.CurrentSceneName, "CoreScene", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(SceneRefs.CurrentSceneName, "CharacterSelectScene", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(SceneRefs.CurrentSceneName, "HubScene", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(SceneRefs.CurrentSceneName, "Unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                _transitionActive = false;
+                return;
+            }
+
+            var trans = SceneRefs.Transition;
+            if (trans != null && trans.gameObject.activeInHierarchy)
+            {
+                var mat = trans.jacketTargetMaterial ?? trans.jacket?._H;
+                var tex = mat?.mainTexture;
+
+                // 곡 정보가 주입되어 자켓 텍스처가 채워진 경우에만 실제 곡 전환 로딩으로 판정
+                if (tex == null)
                 {
-                    _transitionActive = false;
+                    return;
+                }
+
+                if (!_transitionActive)
+                {
+                    _transitionActive = true;
+                    logger.Msg("──────────────────────────────────────────────────────────────────────────");
+                    logger.Msg("[JacketHook][로딩씬] SongTransitionLayer 진입 (곡 시작 전환)");
+
+                    if (trans.jacket != null)
+                    {
+                        string matName = mat != null ? mat.name : "null";
+                        string texName = tex.name;
+                        string texDim = $" ({tex.width}x{tex.height})";
+                        logger.Msg($"  ├ jacket 컴포넌트: {trans.jacket.name} (머티리얼: {matName}, 텍스처: {texName}{texDim})");
+                    }
+                    if (trans.jacketTargetMaterial != null)
+                    {
+                        logger.Msg($"  ├ jacketTargetMaterial: {trans.jacketTargetMaterial.name}");
+                    }
+                    if (trans.backgroundJacket != null)
+                    {
+                        logger.Msg($"  └ backgroundJacket: {trans.backgroundJacket.name}");
+                    }
+                    logger.Msg("──────────────────────────────────────────────────────────────────────────");
                 }
             }
             else
@@ -477,6 +583,21 @@ namespace InFalsusMods
 
             int dot = chartFileName.LastIndexOf('.');
             return dot > 0 ? chartFileName.Substring(0, dot) : chartFileName;
+        }
+
+        private static string SafeGetText(Constrained2D c2d)
+        {
+            try
+            {
+                if (c2d == null) return string.Empty;
+                var ft = c2d.GetComponent<FastText>();
+                if (ft != null) return SafeGetText(ft);
+                return c2d.name ?? string.Empty;
+            }
+            catch
+            {
+                return c2d?.name ?? string.Empty;
+            }
         }
 
         private static string SafeGetText(FastText ft)
