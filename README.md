@@ -29,7 +29,8 @@
 - `StoryScene._gS.IsStoryAllowFastForward = true` 강제 적용으로 모든 스토리 구간 즉시 빨리감기/스킵 가능.
 
 ### 5. 정밀 오디오 & 자켓 감지 시스템 (`BgmHook`, `JacketHook`)
-- `StreamingAssetsMapping` GUID ↔ 논리 파일명(`.ogg` 등 10,346개) 자동 해독 캐시.
+- `StreamingAssetsMapping` GUID ↔ 논리 파일명(`.wav`/`.spc` 등 10,346개) 자동 해독 캐시.
+- 곡 음원은 lowiro 네이티브 레이어(`ifapp_fmod_native`)가 복호화하는 암호화 파일이라 파일 교체로는 넣을 수 없음(2026-09-23 실측) — [03번 문서](docs/03-판정-오디오-세이브.md) 2장.
 - 크래시 위험이 있는 `_qCA`(byref 구조체) 대신 안전한 `_QCA(float)`(재생바 진행도) 기반 무장 트리거.
 - 정밀 오디오 재생 시계(`_Dg._miA` - 리드인 음수 클럭) 및 차트 종료 시각 상수(`_xe` 계열) 규명.
 
