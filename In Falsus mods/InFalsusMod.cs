@@ -37,11 +37,15 @@ namespace InFalsusMods
             BgmHook.Init(HarmonyInstance, LoggerInstance);
             AudioInjector.Init(HarmonyInstance, LoggerInstance);
             JacketInjector.Init(HarmonyInstance, LoggerInstance);
+            VideoInjector.Init(LoggerInstance);
         }
 
         public override void OnUpdate()
         {
             _frames++;
+
+            // 매 프레임: 영상 시계를 게임 재생 위치에 맞춘다 (영상이 없으면 즉시 반환)
+            VideoInjector.Update();
 
             // 10프레임 주기(약 6Hz): 상태 감지 및 인게임 차트/스토리/오디오/UI 틱
             if (_frames % DetectorIntervalFrames == 0)
@@ -55,6 +59,7 @@ namespace InFalsusMods
                 BgmHook.Tick(LoggerInstance);
                 AudioInjector.Tick(LoggerInstance);
                 JacketInjector.Tick(LoggerInstance);
+                VideoInjector.Tick(LoggerInstance);
                 FmodProbe.Tick(LoggerInstance);
             }
 
@@ -63,6 +68,12 @@ namespace InFalsusMods
             {
                 SongListDumper.Tick(LoggerInstance);
             }
+        }
+
+        public override void OnApplicationQuit()
+        {
+            // 플레이 중 종료 시 영상 디코더가 Unity 종료를 붙잡지 않게 먼저 끊는다
+            VideoInjector.Shutdown();
         }
 
         /// <summary>
