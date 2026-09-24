@@ -35,7 +35,8 @@ namespace InFalsusMods
     ///
     /// 세이브 보호: 곡 선택에서 새 곡을 고르면 GeneralSaveStateV5.PackIdToSelectedSongId 에 새 ID 가 남을 수 있다.
     /// 모드를 빼면 게임이 모르는 곡을 선택된 곡으로 읽게 되므로, 곡 선택을 나갈 때와 게임 종료 때 원본 곡 ID 로 되돌린다.
-    /// 점수 기록(GameResultsV4.TryUpdate)은 ref SongInfo 인자라 후킹할 수 없다(docs/04 1장) — 기록이 생기면 로그로만 알린다.
+    /// 점수 기록(GameResultsV4.TryUpdate)은 ref SongInfo 인자라 Harmony 로는 못 막고 ResultGuard 가 네이티브 훅으로 막는다.
+    /// 그래도 기록이 생기면 ScrubSave 가 로그로 알린다.
     /// </summary>
     internal static class NewSongInjector
     {
@@ -73,6 +74,8 @@ namespace InFalsusMods
 
             // 새 곡 차트('hwaN.spc')는 원곡 파일 별칭이라 원곡 이름으로 파싱하고, hwa/hwaN.txt 가 있으면 그 채보로 바꾼다
             ChartInjector.RegisterSong(NewSlug, SourceSlug);
+            // 새 곡 결과는 세이브에 기록하지 않는다
+            ResultGuard.BlockSong(NewId);
 
             logger.Msg($"[NewSongInjector] 준비 완료 ('{SourceSlug}' 복사 → '{NewSlug}' SongId {NewId}, 제목 '{Title}') — " +
                        $"자켓 교체 대상을 기본 자켓({string.Join(", ", FallbackJacketNames)})으로 바꿈");

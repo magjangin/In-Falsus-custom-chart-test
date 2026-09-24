@@ -39,7 +39,8 @@ namespace InFalsusMods
             JacketInjector.Init(HarmonyInstance, LoggerInstance);
             VideoInjector.Init(LoggerInstance);
             ChartInjector.Init(LoggerInstance);
-            NewSongInjector.Init(LoggerInstance);   // ChartInjector 에 새 곡을 등록하므로 뒤에
+            ResultGuard.Init(LoggerInstance);
+            NewSongInjector.Init(LoggerInstance);   // 위 둘에 새 곡을 등록하므로 뒤에
         }
 
         public override void OnUpdate()
