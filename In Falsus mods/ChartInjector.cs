@@ -156,12 +156,12 @@ namespace InFalsusMods
         private static void InjectCustom(string chartFile, string sourceFile, IntPtr r)
         {
             string chartId = chartFile.Substring(0, chartFile.Length - 4);
-            string path = Path.Combine(HwaPaths.HwaDirectory ?? "", chartId + ".txt");
+            string path = FindChartFile(chartId);
 
-            if (!File.Exists(path))
+            if (path == null)
             {
                 LastInjectedEndMs = 0;
-                _logger.Msg($"[ChartInjector] '{chartFile}': 커스텀 채보 없음({Path.GetFileName(path)}) — 원곡 '{sourceFile}' 차트로 진행 " +
+                _logger.Msg($"[ChartInjector] '{chartFile}': 커스텀 채보 없음({chartId}.bms / .txt) — 원곡 '{sourceFile}' 차트로 진행 " +
                             $"(노트 {ListCount(*(IntPtr*)(r + 0x10))}개)");
                 return;
             }
@@ -169,7 +169,9 @@ namespace InFalsusMods
             ChartData chart;
             try
             {
-                chart = ChartText.Load(path);
+                chart = Path.GetExtension(path).Equals(".txt", StringComparison.OrdinalIgnoreCase)
+                    ? ChartText.Load(path)
+                    : LoadBms(path);
             }
             catch (Exception ex) when (ex is FormatException || ex is IOException)
             {
@@ -199,6 +201,28 @@ namespace InFalsusMods
 
             _logger.Msg($"[ChartInjector] '{chartFile}' 커스텀 채보 주입 — {Path.GetFileName(path)}: 노트 {chart.Notes.Count}개" +
                         $"(원곡 {before}개 대체), 이벤트 {chart.Events.Count}개, chart {chart.Bpm} {chart.Beats}, 마지막 노트 끝 {chart.LastNoteEndMs}ms");
+        }
+
+        /// <summary>hwa/&lt;차트ID&gt;.bms(.bme · .bml) 를 먼저, 없으면 .txt. 둘 다 없으면 null.</summary>
+        private static string FindChartFile(string chartId)
+        {
+            string dir = HwaPaths.HwaDirectory ?? "";
+            foreach (var ext in new[] { ".bms", ".bme", ".bml", ".txt" })
+            {
+                string path = Path.Combine(dir, chartId + ext);
+                if (File.Exists(path)) return path;
+            }
+            return null;
+        }
+
+        private static ChartData LoadBms(string path)
+        {
+            var result = BmsChart.Load(path);
+            _logger.Msg($"[ChartInjector] {Path.GetFileName(path)} — {result.Summary}");
+            const int MaxWarnings = 15;
+            for (int i = 0; i < result.Warnings.Count && i < MaxWarnings; i++) _logger.Warning($"[ChartInjector]   ⚠ {result.Warnings[i]}");
+            if (result.Warnings.Count > MaxWarnings) _logger.Warning($"[ChartInjector]   ⚠ … 경고 {result.Warnings.Count - MaxWarnings}개 더");
+            return result.Chart;
         }
 
         /// <summary>
