@@ -67,6 +67,7 @@ namespace InFalsusMods
             if (_frames % PollIntervalFrames == 0)
             {
                 SongListDumper.Tick(LoggerInstance);
+                NewSongProbe.Tick(LoggerInstance);
             }
         }
 
