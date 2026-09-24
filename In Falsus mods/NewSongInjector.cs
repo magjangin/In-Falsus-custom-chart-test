@@ -71,6 +71,9 @@ namespace InFalsusMods
             // 새 곡은 기본 자켓을 쓰므로 자켓 교체도 원곡 대신 기본 자켓으로 — 머티리얼이 쓰이기 전에 바꿔야 한다
             JacketInjector.TargetMaterialNames = FallbackJacketNames;
 
+            // 새 곡 차트('hwaN.spc')는 원곡 파일 별칭이라 원곡 이름으로 파싱하고, hwa/hwaN.txt 가 있으면 그 채보로 바꾼다
+            ChartInjector.RegisterSong(NewSlug, SourceSlug);
+
             logger.Msg($"[NewSongInjector] 준비 완료 ('{SourceSlug}' 복사 → '{NewSlug}' SongId {NewId}, 제목 '{Title}') — " +
                        $"자켓 교체 대상을 기본 자켓({string.Join(", ", FallbackJacketNames)})으로 바꿈");
         }

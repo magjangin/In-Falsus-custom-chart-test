@@ -196,7 +196,8 @@ namespace InFalsusMods
             var np = LogicalNotePlayer._Qe;
             if (np == null) return;
 
-            double target = _hwaLengthMs;
+            // 커스텀 채보가 음원보다 길면 마지막 노트까지는 끝내지 않는다
+            double target = Math.Max(_hwaLengthMs, ChartInjector.LastInjectedEndMs);
             double xe = np._xe;
             if (xe == target && np._Xe == target && np._a == target && np._A == target) return;
 

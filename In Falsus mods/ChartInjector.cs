@@ -1,62 +1,343 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using MelonLoader;
+using MelonLoader.NativeUtils;
+using Il2CppInterop.Runtime;
 using Il2Cpp_b;
 using Il2Cppifapp.Game;
 
 namespace InFalsusMods
 {
     /// <summary>
-    /// 커스텀 차트 주입 실험 — **맨 처음 노트 하나만 남기고 전부 지운다.**
+    /// 커스텀 채보 주입 — 차트 로더 `_b._s._VA(string 차트파일명) : _R` 에 네이티브 훅을 건다.
     ///
-    /// 1차 시도(2026-09-10)에서 `LogicalNotePlayer._Ue.Item2`(논리 노트 List)를 제자리에서
-    /// 132개 → 1개로 줄이는 데 성공했지만 **인게임에는 아무 변화가 없었다.** 이유는 게임이
-    /// 로드 시점(`_Ib`)에 논리 노트를 다른 자료구조로 변환해 두고 그쪽만 보기 때문이다:
+    /// 게임 흐름 (1.0.4b 네이티브 코드로 확인, 2026-09-24):
+    ///   _s._VA("hwa0.spc")                      등록부에서 AssetId → 파일 읽기 → _S._Gab(바이트, 이름)
+    ///     └ _R { (_t, List&lt;_fA&gt;, List&lt;_eA&gt;), sourceText }
+    ///   GameScene._qk → _Qk(이름, _R) → LogicalNotePlayer._Ib(이름, long, 튜플, sourceText, 미러)
+    ///     └ _T(_ve) 를 새로 만들고 노트마다 _pb 로 side 컨테이너를 채운 뒤 _qb·_nb·_Pb·_Kb·_Lb·_mb·_Mb 로 파생 버퍼 계산,
+    ///       _Ue = 튜플, _xe = _Xe = 마지막 노트/이벤트 시각. → 파서 출력만 바꾸면 판정 레인·판정 윈도우·곡 종료가 전부 따라온다.
     ///
-    ///   LogicalNotePlayer._ve  (타입 _T, 클래스)
-    ///     ├ _vC : Dictionary&lt;_CA, _hA&gt;   ← **side(Bottom/Sky)별 실제 노트 저장소**
-    ///     │        _hA._ye : Il2CppStructArray&lt;_fA&gt;  (백킹 배열)
-    ///     │        _hA._Ye : Memory&lt;_fA&gt;             (실제로 쓰는 구간)
-    ///     │        _hA._ze : int                      (개수로 추정)
-    ///     ├ _ZC : Memory&lt;_IA&gt;   (double 2개 = 시간 범위, 병렬 배열)
-    ///     ├ _ad : Memory&lt;_jA&gt;   (Vector2 2개 = 좌표, 병렬 배열)
-    ///     └ _zC : Memory&lt;_eA&gt;   (이벤트)
+    /// 왜 _VA 인가:
+    /// - _Gab 은 디코더 시드를 **파일 이름**으로 만든다(_Z._Ab(name, noteCount, 1)). 새 곡 차트 'hwa0.spc' 는 원곡 파일 별칭이라
+    ///   그대로 두면 원곡 바이트를 'hwa0.spc' 시드로 풀어 쓰레기가 나온다. 그래서 _VA 에서 이름을 원곡('alamode0.spc')으로 바꿔 부른다.
+    /// - _Ib·_Qk 는 큰 구조체를 값으로 받아 Harmony(인터롭 트램펄린)로 후킹하면 죽는다(docs/04 1장). 네이티브 훅은 인자를 IntPtr 로만
+    ///   받으므로 이 문제가 없다. _VA 는 (반환 버퍼, 문자열, MethodInfo*) 뿐이다.
     ///
-    /// 그래서 이번에는 `_vC` 쪽을 자른다. `_hA` 는 클래스라 참조로 직접 고쳐지고,
-    /// `Memory&lt;T&gt;.Slice` 와 `_ze` setter 가 모두 살아 있어 후킹이 필요 없다.
-    ///
-    /// 후킹이 답이 아닌 이유: 변환 지점 `_Ib(string, long, ValueTuple&lt;...&gt;, string, bool)` 는
-    /// 튜플을 `il2cpp_object_unbox` 한 **생 구조체 포인터**로 받는다. 인바운드 트램펄린이 이걸
-    /// 객체로 오해하므로 8장의 `_qCA` 크래시가 그대로 재현된다. 파서 `_Gab` 도 `ReadOnlySpan&lt;byte&gt;`
-    /// 라 같은 함정이다. **살아있는 자료구조를 직접 고치는 쪽이 유일하게 안전한 경로다.**
+    /// 주의: 원본(_vaOriginal) 안에서 IL2CPP 예외가 나면 이 관리 코드 프레임을 C++ 예외가 지나가게 된다 — 존재하는 차트 이름만 넘길 것.
     /// </summary>
-    internal static class ChartInjector
+    internal static unsafe class ChartInjector
     {
-        /// <summary>주입 실험 스위치. true면 1개만 남기고 자르는 실험 활성화.</summary>
         public static bool Enabled { get; set; } = true;
 
-        /// <summary>앞에서부터 남길 노트 개수 (기본 1개 실험용).</summary>
-        public static int KeepCount { get; set; } = 1;
+        /// <summary>게임이 불러오는 원곡 차트를 UserData/InFalsusMods/chart_dump/ 에 텍스트로 떠 둔다 (이미 있으면 건너뜀).</summary>
+        public static bool DumpLoadedCharts { get; set; } = true;
+
+        /// <summary>곡 선택 화면에서 모든 차트를 한 틱에 하나씩 직접 불러 덤프한다 — 채보 포맷 분석용 전체 자료.</summary>
+        public static bool DumpAllCharts { get; set; } = true;
+
+        /// <summary>마지막으로 주입한 커스텀 채보의 마지막 노트 끝(ms). AudioInjector 가 곡 종료 시각을 정할 때 쓴다.</summary>
+        public static int LastInjectedEndMs { get; private set; }
+
+        private const string VaFieldPrefix = "NativeMethodInfoPtr__VA_";
+        private const long ExpectedVaRva = 0x537680;   // 1.0.4b (cpp2il_out/Game.dll 의 Address 속성)
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr VaFn(IntPtr ret, IntPtr name, IntPtr methodInfo);
+
+        // Unity CoreModule 에도 같은 이름의 UnmanagedCallersOnlyAttribute 가 있어 못 쓴다 — 델리게이트를 살려 두고 함수 포인터로 넘긴다
+        private static readonly VaFn _vaDetour = VaDetour;
+        private static NativeHook<VaFn> _vaHook;
+        private static delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr> _vaOriginal;
+        private static MelonLogger.Instance _logger;
+        private static string _dumpDir;
+
+        private static readonly Dictionary<string, string> _songAliases = new();   // 새 곡 슬러그 → 원곡 슬러그
+        private static readonly Dictionary<string, object[]> _keepAlive = new();    // 차트 파일명 → 주입한 리스트(GC 핸들 유지)
+        private static readonly HashSet<string> _injected = new();                  // 커스텀 채보를 넣은 차트 파일명
+        private static readonly Dictionary<long, _BA> _coordCache = new();
+        private static readonly object _gate = new();
+
+        /// <summary>새 곡 슬러그의 차트('hwa2.spc')를 원곡('alamode2.spc')으로 파싱하게 등록한다.</summary>
+        public static void RegisterSong(string newSlug, string sourceSlug)
+        {
+            lock (_gate) _songAliases[newSlug] = sourceSlug;
+        }
+
+        public static void Init(MelonLogger.Instance logger)
+        {
+            _logger = logger;
+            if (!Enabled) return;
+
+            try
+            {
+                _dumpDir = Path.Combine(MelonLoader.Utils.MelonEnvironment.UserDataDirectory, "InFalsusMods", "chart_dump");
+                Directory.CreateDirectory(_dumpDir);
+
+                var field = FindStaticField(typeof(_s), VaFieldPrefix);
+                var methodInfo = (IntPtr)field.GetValue(null);
+                if (methodInfo == IntPtr.Zero) throw new InvalidOperationException($"{field.Name} 가 0");
+                var target = *(IntPtr*)methodInfo;   // Il2CppMethodInfo 첫 필드 = methodPointer
+
+                long rva = target.ToInt64() - GetModuleHandleW("GameAssembly.dll").ToInt64();
+                string rvaNote = rva == ExpectedVaRva ? "1.0.4b 와 같음" : $"⚠ 1.0.4b({ExpectedVaRva:X}) 와 다름 — 업데이트됐을 수 있음";
+
+                _vaHook = new NativeHook<VaFn>(target, Marshal.GetFunctionPointerForDelegate(_vaDetour));
+                _vaHook.Attach();
+                _vaOriginal = (delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr>)_vaHook.TrampolineHandle;
+
+                logger.Msg($"[ChartInjector] _s._VA 네이티브 훅 완료 (RVA 0x{rva:X}, {rvaNote}) — 커스텀 채보 폴더 {HwaPaths.HwaDirectory}, 덤프 {_dumpDir}");
+            }
+            catch (Exception ex)
+            {
+                Enabled = false;
+                logger.Error($"[ChartInjector] 훅 실패 — 커스텀 채보 꺼짐: {ex}");
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────── 네이티브 훅
+
+        private static IntPtr VaDetour(IntPtr ret, IntPtr name, IntPtr methodInfo)
+        {
+            string chartFile = null, sourceFile = null;
+            IntPtr callName = name;
+            try
+            {
+                chartFile = IL2CPP.Il2CppStringToManaged(name);
+                sourceFile = SourceFileFor(chartFile);
+                if (sourceFile != null) callName = IL2CPP.ManagedStringToIl2Cpp(sourceFile);
+            }
+            catch (Exception ex)
+            {
+                sourceFile = null;
+                callName = name;
+                _logger?.Error($"[ChartInjector] _VA 이름 처리 실패 — 원본 그대로: {ex.Message}");
+            }
+
+            IntPtr result = _vaOriginal(ret, callName, methodInfo);
+
+            try
+            {
+                if (sourceFile != null) InjectCustom(chartFile, sourceFile, ret);
+                else if (DumpLoadedCharts && chartFile != null) DumpParsed(chartFile, ret);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error($"[ChartInjector] '{chartFile}' 파싱 후 처리 실패 (게임은 파싱 결과 그대로 진행): {ex}");
+            }
+            return result;
+        }
+
+        /// <summary>'hwa2.spc' → 'alamode2.spc'. 등록된 새 곡 차트가 아니면 null.</summary>
+        private static string SourceFileFor(string chartFile)
+        {
+            if (chartFile == null || !chartFile.EndsWith(".spc", StringComparison.Ordinal)) return null;
+            string id = chartFile.Substring(0, chartFile.Length - 4);
+
+            lock (_gate)
+            {
+                foreach (var kv in _songAliases)
+                {
+                    if (!id.StartsWith(kv.Key, StringComparison.Ordinal)) continue;
+                    string rest = id.Substring(kv.Key.Length);
+                    if (rest.Length == 0 || !IsDigits(rest)) continue;
+                    return kv.Value + rest + ".spc";
+                }
+            }
+            return null;
+        }
+
+        // ─────────────────────────────────────────────────────────────── 주입
+
+        /// <summary>_R 레이아웃: +0x00 _t(float _uC, +0x08 float _UC) · +0x10 List&lt;_fA&gt; · +0x18 List&lt;_eA&gt; · +0x20 string sourceText.</summary>
+        private static void InjectCustom(string chartFile, string sourceFile, IntPtr r)
+        {
+            string chartId = chartFile.Substring(0, chartFile.Length - 4);
+            string path = Path.Combine(HwaPaths.HwaDirectory ?? "", chartId + ".txt");
+
+            if (!File.Exists(path))
+            {
+                LastInjectedEndMs = 0;
+                _logger.Msg($"[ChartInjector] '{chartFile}': 커스텀 채보 없음({Path.GetFileName(path)}) — 원곡 '{sourceFile}' 차트로 진행 " +
+                            $"(노트 {ListCount(*(IntPtr*)(r + 0x10))}개)");
+                return;
+            }
+
+            ChartData chart;
+            try
+            {
+                chart = ChartText.Load(path);
+            }
+            catch (Exception ex) when (ex is FormatException || ex is IOException)
+            {
+                LastInjectedEndMs = 0;
+                _logger.Warning($"[ChartInjector] ⚠ 채보 파일 오류 — 원곡 '{sourceFile}' 차트로 진행: {ex.Message}");
+                return;
+            }
+
+            var notes = new Il2CppSystem.Collections.Generic.List<_fA>(chart.Notes.Count);
+            foreach (var row in chart.Notes) notes.Add(ToNote(row));
+            var events = new Il2CppSystem.Collections.Generic.List<_eA>(chart.Events.Count);
+            foreach (var row in chart.Events) events.Add(ToEvent(row));
+
+            int before = ListCount(*(IntPtr*)(r + 0x10));
+            *(float*)(r + 0x00) = chart.Bpm;
+            *(float*)(r + 0x08) = chart.Beats;
+            *(IntPtr*)(r + 0x10) = notes.Pointer;
+            *(IntPtr*)(r + 0x18) = events.Pointer;
+
+            lock (_gate)
+            {
+                _keepAlive[chartFile] = new object[] { notes, events };   // 게임이 _Ue 에 담기 전까지 살려 둔다
+                _injected.Add(chartFile);
+            }
+            LastInjectedEndMs = chart.LastNoteEndMs;
+            ForgetLoadedChart(chartFile);
+
+            _logger.Msg($"[ChartInjector] '{chartFile}' 커스텀 채보 주입 — {Path.GetFileName(path)}: 노트 {chart.Notes.Count}개" +
+                        $"(원곡 {before}개 대체), 이벤트 {chart.Events.Count}개, chart {chart.Bpm} {chart.Beats}, 마지막 노트 끝 {chart.LastNoteEndMs}ms");
+        }
 
         /// <summary>
-        /// 논리 노트 List(_Ue.Item2)도 같이 자를지 여부. 기본 false.
-        /// 인게임 동작에는 영향이 없다는 것이 실측으로 확인됐고, 켜 두면 NoteListDumper 가
-        /// 원본 차트를 못 보여줘서 비교가 안 된다.
+        /// _Ib 는 이름·ID·sourceText 가 지금 들고 있는 것과 같으면 새 튜플을 버리고 리셋만 한다(네이티브 코드 확인).
+        /// LogicalNotePlayer 가 이 차트를 들고 남아 있으면 고친 채보가 안 들어가므로 이름을 비워 다시 계산하게 한다.
         /// </summary>
-        public static bool MutateLogicalList { get; set; } = false;
+        private static void ForgetLoadedChart(string chartFile)
+        {
+            var np = LogicalNotePlayer._Qe;
+            if (np == null || np._Ve != chartFile) return;
+            np._Ve = null;
+            _logger.Msg($"[ChartInjector]   └ 이전 '{chartFile}' 를 들고 있던 LogicalNotePlayer 발견 — 다시 계산하도록 이름을 비움");
+        }
 
-        /// <summary>
-        /// 남긴 노트의 레인(가로 위치)을 강제로 바꿀지 여부.
-        ///
-        /// 위치는 `_fA._Ce`(startX) / `_de`(endX) 에 `_BA`(분자/분모 유리수)로 들어 있다.
-        /// 실측상 하단 노트는 분모 4 에 분자 1~5 를 쓴다(1/4, 2/4, 3/4, 5/4 …).
-        /// 분모는 원본을 그대로 두고 분자만 갈아끼워서 원본과 다른 자리에 뜨는지 본다.
-        /// </summary>
-        public static bool OverrideLane { get; set; } = true;
+        private static _fA ToNote(NoteRow n)
+        {
+            return new _fA
+            {
+                _ZD = n.Id,
+                _ae = n.Group,
+                _Ae = (_CA)n.Side,
+                _be = (_HA)(uint)n.Type,
+                _Be = n.Start,
+                _ce = n.End,
+                _Ce = Ba(n.StartX),
+                _de = Ba(n.EndX),
+                _De = Ba(n.StartW),
+                _ee = Ba(n.EndW),
+                _Ee = n.Ee,
+                _fe = n.Fe_,
+                _Fe = n.FE,
+                _ge = n.Ge_,
+                _Ge = n.GE,
+                _he = (_FA)n.He_,
+                _He = n.HE,
+                _ie = n.Ie,
+            };
+        }
 
-        /// <summary>바꿀 레인의 분자. 분모는 원본 노트의 것을 그대로 쓴다.</summary>
-        public static int LaneNumerator { get; set; } = 3;
+        private static _eA ToEvent(EventRow e)
+        {
+            var ev = new _eA { _TD = e.TD, _uD = e.UD_, _UD = (_EA)e.Kind };
+            byte* p = (byte*)&ev + 0x10;
+            for (int i = 0; i < 16; i++) p[i] = e.Payload[i];
+            return ev;
+        }
 
-        private static string _injectedChart;
+        /// <summary>_BA 는 필드가 readonly 이고 실수값(_LD)을 게임 생성자가 계산하므로 생성자로 만든다 — 같은 좌표는 재사용.</summary>
+        private static _BA Ba(Coord c)
+        {
+            long key = ((long)c.Num << 32) | (uint)c.Den;
+            lock (_gate)
+            {
+                if (!_coordCache.TryGetValue(key, out var ba))
+                {
+                    ba = new _BA(c.Num, c.Den);
+                    _coordCache[key] = ba;
+                }
+                return ba;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────── 덤프
+
+        private static void DumpParsed(string chartFile, IntPtr r)
+        {
+            if (_dumpDir == null || !chartFile.EndsWith(".spc", StringComparison.Ordinal)) return;
+            string path = Path.Combine(_dumpDir, chartFile.Substring(0, chartFile.Length - 4) + ".txt");
+            if (File.Exists(path)) return;
+
+            var chart = new ChartData { Bpm = *(float*)(r + 0x00), Beats = *(float*)(r + 0x08) };
+
+            IntPtr notesPtr = *(IntPtr*)(r + 0x10);
+            if (notesPtr != IntPtr.Zero)
+            {
+                var notes = new Il2CppSystem.Collections.Generic.List<_fA>(notesPtr);
+                for (int i = 0; i < notes.Count; i++) chart.Notes.Add(FromNote(notes[i]));
+            }
+
+            IntPtr eventsPtr = *(IntPtr*)(r + 0x18);
+            if (eventsPtr != IntPtr.Zero)
+            {
+                var events = new Il2CppSystem.Collections.Generic.List<_eA>(eventsPtr);
+                for (int i = 0; i < events.Count; i++) chart.Events.Add(FromEvent(events[i]));
+            }
+
+            File.WriteAllText(path, ChartText.Format(chart, $"{chartFile} — 게임 파서(_S._Gab) 출력 그대로"));
+            _dumpCount++;
+            if (_dumpCount <= 5 || _dumpCount % 50 == 0)
+            {
+                _logger.Msg($"[ChartInjector] 덤프 #{_dumpCount} {chartFile}: 노트 {chart.Notes.Count}, 이벤트 {chart.Events.Count}, chart {chart.Bpm} {chart.Beats}");
+            }
+        }
+
+        private static int _dumpCount;
+
+        private static NoteRow FromNote(_fA n)
+        {
+            return new NoteRow
+            {
+                Id = n._ZD,
+                Group = n._ae,
+                Side = (int)n._Ae,
+                Type = (int)n._be,
+                Start = n._Be,
+                End = n._ce,
+                StartX = new Coord(n._Ce._KD, n._Ce._lD),
+                EndX = new Coord(n._de._KD, n._de._lD),
+                StartW = new Coord(n._De._KD, n._De._lD),
+                EndW = new Coord(n._ee._KD, n._ee._lD),
+                Ee = n._Ee,
+                Fe_ = n._fe,
+                FE = n._Fe,
+                Ge_ = n._ge,
+                GE = n._Ge,
+                He_ = (int)n._he,
+                HE = n._He,
+                Ie = n._ie,
+            };
+        }
+
+        private static EventRow FromEvent(_eA e)
+        {
+            var row = new EventRow { TD = e._TD, UD_ = e._uD, Kind = (int)e._UD };
+            byte* p = (byte*)&e + 0x10;
+            for (int i = 0; i < 16; i++) row.Payload[i] = p[i];
+            return row;
+        }
+
+        private static int ListCount(IntPtr list)
+        {
+            return list == IntPtr.Zero ? -1 : new Il2CppSystem.Collections.Generic.List<_fA>(list).Count;
+        }
+
+        // ─────────────────────────────────────────────────────────────── 틱 (검증 로그·전체 덤프)
+
+        private static string _reportedChart;
+        private static Queue<string> _dumpQueue;
+        private static int _dumpQueueTotal;
 
         public static void Tick(MelonLogger.Instance log)
         {
@@ -64,198 +345,114 @@ namespace InFalsusMods
 
             try
             {
-                var np = LogicalNotePlayer._Qe;
-                string chartId = np == null ? null : np._Ve;
-
-                if (string.IsNullOrEmpty(chartId))
-                {
-                    _injectedChart = null;   // 플레이 씬을 나가면 다음 곡에서 다시 주입
-                    return;
-                }
-
-                if (chartId == _injectedChart) return;
-
-                var notes = np._Ue.Item2;
-                if (notes == null || notes.Count == 0) return;   // 아직 파싱 전
-
-                var state = np._ve;
-                if (state == null) return;                        // 변환 전
-
-                _injectedChart = chartId;
-
-                var firstNote = notes[0];
-
-                log.Msg("══════════════════════════════════════════════════════════════════════════");
-                log.Msg($"[ChartInjector] '{chartId}' 주입 시작 — 논리 노트 {notes.Count}개");
-                log.Msg($"[ChartInjector]   └ 첫 노트: id={firstNote._ZD} group={firstNote._ae} " +
-                        $"side={firstNote._Ae} type={firstNote._be} judge {firstNote._Be}~{firstNote._ce}ms" +
-                        $"{(firstNote._ce > firstNote._Be ? " (홀드)" : " (단노트)")}");
-
-                DumpParallelBuffers(state, log, "주입 전");
-                int trimmed = TrimSideBuffers(state, firstNote._Ae, log);
-                DumpParallelBuffers(state, log, "주입 후");
-
-                if (MutateLogicalList)
-                {
-                    notes.Clear();
-                    notes.Add(firstNote);
-                    log.Msg($"[ChartInjector]   └ 논리 노트 List 도 {notes.Count}개로 축소");
-                }
-
-                log.Msg($"[ChartInjector] 완료 — side 컨테이너 {trimmed}개 조정");
-                log.Msg("══════════════════════════════════════════════════════════════════════════");
+                ReportLoadedChart(log);
+                if (DumpAllCharts) DumpNextChart(log);
             }
             catch (Exception ex)
             {
-                _injectedChart = null;
-                log.Error($"[ChartInjector] 주입 실패: {ex}");
+                DumpAllCharts = false;
+                log.Error($"[ChartInjector] 틱 예외 — 전체 덤프 중단: {ex}");
             }
         }
 
-        /// <summary>
-        /// side 별 노트 컨테이너(_vC)를 잘라낸다.
-        /// 첫 노트가 속한 side 만 KeepCount 개를 남기고 나머지 side 는 0 개로 만든다.
-        /// </summary>
-        private static int TrimSideBuffers(_T state, _CA keepSide, MelonLogger.Instance log)
+        /// <summary>커스텀 채보가 _Ib 를 거쳐 실제 런타임 구조(_ve)에 들어갔는지 한 번 찍는다.</summary>
+        private static void ReportLoadedChart(MelonLogger.Instance log)
         {
-            var bySide = state._vC;
-            if (bySide == null)
+            var np = LogicalNotePlayer._Qe;
+            string chart = np != null ? np._Ve : null;
+            if (string.IsNullOrEmpty(chart) || np._ve == null)
             {
-                log.Warning("[ChartInjector]   ! _vC 가 null — side 컨테이너를 찾지 못했습니다");
-                return 0;
+                if (!SceneRefs.IsGameScene) _reportedChart = null;
+                return;
             }
+            if (chart == _reportedChart) return;
+            _reportedChart = chart;
 
-            int touched = 0;
+            bool injected;
+            lock (_gate) injected = _injected.Contains(chart);
 
+            var logical = np._Ue.Item2;
+            var sides = new List<string>();
+            var bySide = np._ve._vC;
             foreach (_CA side in Enum.GetValues(typeof(_CA)))
             {
-                _hA container = null;
-                try
-                {
-                    if (!bySide.ContainsKey(side)) continue;
-                    container = bySide[side];
-                }
-                catch { continue; }
-
-                if (container == null) continue;
-
-                int before = container._Ye.Length;
-                int keep = (side == keepSide) ? Math.Min(KeepCount, before) : 0;
-
-                container._Ye = container._Ye.Slice(0, keep);
-                container._ze = keep;
-                touched++;
-
-                log.Msg($"[ChartInjector]   └ side {side}: _Ye {before} → {container._Ye.Length}개, _ze={container._ze}" +
-                        $"{(side == keepSide ? "  ← 첫 노트가 있는 side" : "")}");
-
-                if (side == keepSide && keep > 0 && OverrideLane)
-                {
-                    ApplyLaneOverride(container, log);
-                }
+                if (bySide != null && bySide.ContainsKey(side)) sides.Add($"{side}={bySide[side]._ze}");
             }
-
-            return touched;
+            log.Msg($"[ChartInjector][플레이] '{chart}' {(injected ? "커스텀 채보" : "원본")} — 논리 노트 {logical?.Count ?? -1}개, " +
+                    $"side별 [{string.Join(" ", sides)}], _xe={np._xe:F0}ms");
         }
 
-        /// <summary>
-        /// 남긴 노트의 가로 위치를 바꾼다.
-        ///
-        /// `_hA._ye` 는 `Il2CppStructArray&lt;_fA&gt;`(백킹 배열)라 인덱서로 읽고 쓸 수 있다.
-        /// `_fA` 는 struct 이므로 인덱서가 **복사본**을 준다 — 고친 뒤 반드시 다시 써넣어야 한다.
-        ///
-        /// 이게 화면에 반영되지 않으면, 렌더러가 `_fA` 대신 로드 시점에 미리 계산해 둔
-        /// `_T._ad`(Memory&lt;_jA&gt; = Vector2 좌표 쌍)를 읽는다는 뜻이다. 그때는 그쪽을 고쳐야 한다.
-        /// </summary>
-        private static void ApplyLaneOverride(_hA container, MelonLogger.Instance log)
+        /// <summary>곡 선택 화면에서 차트를 하나씩 _VA 로 불러 덤프한다(훅의 DumpParsed 가 파일을 쓴다). 등록부에 있는 이름만 부른다.</summary>
+        private static void DumpNextChart(MelonLogger.Instance log)
         {
-            var arr = container._ye;
-            if (arr == null || arr.Length == 0)
+            if (!SceneRefs.IsSongSelectScene) return;
+
+            if (_dumpQueue == null)
             {
-                log.Warning("[ChartInjector]   ! _ye 백킹 배열이 비어 있어 레인을 바꾸지 못했습니다");
+                var select = SceneRefs.SongSelect;
+                var all = select != null && select.dataAccess != null && select.dataAccess.SongData != null
+                    ? select.dataAccess.SongData.allSongInfo : null;
+                var table = Il2Cpp_k._BG._RxA != null ? Il2Cpp_k._BG._RxA._txA : null;
+                if (all == null || table == null) return;
+
+                _dumpQueue = new Queue<string>();
+                for (int i = 0; i < all.Length; i++)
+                {
+                    var charts = all[i]?.ChartInfos;
+                    for (int j = 0; charts != null && j < charts.Length; j++)
+                    {
+                        string file = charts[j].Id + ".spc";
+                        if (SourceFileFor(file) != null) continue;                       // 새 곡은 원곡과 같다
+                        if (!table.ContainsKey(file)) continue;                          // 없는 파일은 원본이 예외를 던진다
+                        if (File.Exists(Path.Combine(_dumpDir, charts[j].Id + ".txt"))) continue;
+                        _dumpQueue.Enqueue(file);
+                    }
+                }
+                _dumpQueueTotal = _dumpQueue.Count;
+                if (_dumpQueueTotal == 0)
+                {
+                    DumpAllCharts = false;   // 이미 다 떠 둠
+                    return;
+                }
+                log.Msg($"[ChartInjector] 전체 차트 덤프 시작 — {_dumpQueueTotal}개 (곡 선택 화면에 있는 동안 한 틱에 하나씩)");
+            }
+
+            if (_dumpQueue.Count == 0)
+            {
+                log.Msg($"[ChartInjector] 전체 차트 덤프 완료 — {_dumpQueueTotal}개 → {_dumpDir}");
+                DumpAllCharts = false;
                 return;
             }
 
-            var note = arr[0];
-
-            // 원본 레인 값을 먼저 기억한다. 아래에서 "이 값과 같은 계산 필드"를 찾아 판정용 사본을 특정한다.
-            int originalNum = note._Ce._KD;
-            int denom = note._Ce._lD;
-            double originalValue = note._Ce._LD;
-            double newValue = denom == 0 ? 0 : LaneNumerator / (double)denom;
-
-            DumpNote(note, log, "변경 전");
-
-            // 1) 렌더링이 읽는 좌표 (실측 확인됨)
-            note._Ce = new _BA(LaneNumerator, denom);
-            note._de = new _BA(LaneNumerator, denom);
-
-            // 2) 판정이 읽는 사본 후보.
-            //    _fA 는 필드가 18개인데 public 생성자는 10개만 채운다. 나머지 8개는 로드 시점에
-            //    게임이 계산해 넣는 값이고, 렌더링과 판정이 서로 다른 걸 읽는다는 게 실측으로 드러났다
-            //    (좌표를 바꾸니 노트는 옮겨졌는데 판정은 원래 자리에 남음 — 2026-09-10).
-            //    그래서 "원본 레인 값과 일치하는 계산 필드"를 값으로 찾아내 같이 갈아끼운다.
-            int patched = 0;
-
-            if (note._He == originalNum) { note._He = LaneNumerator; patched++; log.Msg($"[ChartInjector]   └ _He 가 원본 분자({originalNum})와 일치 → {LaneNumerator} 로 변경"); }
-            if (note._ie == originalNum) { note._ie = LaneNumerator; patched++; log.Msg($"[ChartInjector]   └ _ie 가 원본 분자({originalNum})와 일치 → {LaneNumerator} 로 변경"); }
-
-            if (Near(note._Ee, originalValue)) { note._Ee = newValue; patched++; log.Msg($"[ChartInjector]   └ _Ee 가 원본 좌표({originalValue:0.###})와 일치 → {newValue:0.###} 로 변경"); }
-            if (Near(note._fe, originalValue)) { note._fe = newValue; patched++; log.Msg($"[ChartInjector]   └ _fe 가 원본 좌표({originalValue:0.###})와 일치 → {newValue:0.###} 로 변경"); }
-            if (Near(note._Fe, originalValue)) { note._Fe = newValue; patched++; log.Msg($"[ChartInjector]   └ _Fe 가 원본 좌표({originalValue:0.###})와 일치 → {newValue:0.###} 로 변경"); }
-
-            if (patched == 0)
-            {
-                log.Warning("[ChartInjector]   ! 원본 레인 값과 일치하는 계산 필드를 못 찾았습니다 — " +
-                            "판정 좌표는 _fA 밖(_T._ad 의 Vector2 좌표 등)에 있을 수 있습니다");
-            }
-
-            arr[0] = note;   // struct 복사본을 고친 것이므로 반드시 되써넣는다
-
-            DumpNote(arr[0], log, "변경 후");
-            log.Msg($"[ChartInjector]   └ (_ye 길이 {arr.Length}, _Ye 길이 {container._Ye.Length}, 계산 필드 {patched}개 조정)");
-        }
-
-        private static string Coord(_BA c)
-        {
-            return c._lD == 0 ? "0" : $"{c._KD}/{c._lD}({c._LD:0.###})";
-        }
-
-        private static bool Near(double a, double b)
-        {
-            return Math.Abs(a - b) < 0.0001;
-        }
-
-        /// <summary>
-        /// _fA 의 18개 필드를 전부 찍는다.
-        /// 생성자가 채우는 10개(id~endWidth)와, 로드 시점에 게임이 계산해 넣는 8개
-        /// (_Ee _fe _Fe _ge _Ge _he _He _ie)를 구분해서 본다 — 판정용 좌표가 후자에 숨어 있다.
-        /// </summary>
-        private static void DumpNote(_fA n, MelonLogger.Instance log, string label)
-        {
-            log.Msg($"[ChartInjector]   [{label}] 생성자 필드: id={n._ZD} group={n._ae} side={n._Ae} type={n._be} " +
-                    $"judge {n._Be}~{n._ce}ms");
-            log.Msg($"[ChartInjector]   [{label}]   startX={Coord(n._Ce)} endX={Coord(n._de)} " +
-                    $"startW={Coord(n._De)} endW={Coord(n._ee)}");
-            log.Msg($"[ChartInjector]   [{label}] 계산 필드: _Ee={n._Ee:0.####} _fe={n._fe:0.####} _Fe={n._Fe:0.####} " +
-                    $"_ge={n._ge} _Ge={n._Ge} _he={n._he} _He={n._He} _ie={n._ie}");
-        }
-
-        /// <summary>_T 가 들고 있는 병렬 버퍼 길이를 찍는다. 어느 버퍼가 노트 수와 같은지 대조용.</summary>
-        private static void DumpParallelBuffers(_T state, MelonLogger.Instance log, string label)
-        {
+            string next = _dumpQueue.Dequeue();
             try
             {
-                log.Msg($"[ChartInjector]   [{label}] _ZC(_IA 시간범위)={state._ZC.Length}  _ad(_jA 좌표)={state._ad.Length}  " +
-                        $"_zC(_eA 이벤트)={state._zC.Length}");
-                log.Msg($"[ChartInjector]   [{label}] _Ad/_bd/_Bd(double)={state._Ad.Length}/{state._bd.Length}/{state._Bd.Length}  " +
-                        $"_cd/_dd(_cH)={state._cd.Length}/{state._dd.Length}");
-                log.Msg($"[ChartInjector]   [{label}] ints _YC={state._YC} _Dd={state._Dd} _ed={state._ed} _Ed={state._Ed}  _xC={state._xC}");
+                _s._VA(next);   // 훅을 거치며 DumpParsed 가 파일을 쓴다
             }
             catch (Exception ex)
             {
-                log.Warning($"[ChartInjector]   [{label}] 버퍼 덤프 실패: {ex.Message}");
+                log.Warning($"[ChartInjector] 덤프용 로드 실패 '{next}': {ex.Message}");
             }
         }
+
+        // ─────────────────────────────────────────────────────────────── 도우미
+
+        private static FieldInfo FindStaticField(Type type, string prefix)
+        {
+            foreach (var f in type.GetFields(BindingFlags.NonPublic | BindingFlags.Static))
+            {
+                if (f.Name.StartsWith(prefix, StringComparison.Ordinal)) return f;
+            }
+            throw new MissingFieldException(type.FullName, prefix + "*");
+        }
+
+        private static bool IsDigits(string s)
+        {
+            foreach (char ch in s) if (ch < '0' || ch > '9') return false;
+            return true;
+        }
+
+        [DllImport("kernel32", CharSet = CharSet.Unicode)]
+        private static extern IntPtr GetModuleHandleW(string name);
     }
 }
