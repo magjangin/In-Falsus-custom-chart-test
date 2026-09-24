@@ -34,7 +34,8 @@ namespace InFalsusMods
         public static bool Enabled { get; set; } = true;
 
         // alamode.wav (sam/89523571a0aaeb247ac449748a0fd876). 곡 선택 프리뷰와 플레이 씬 모두 이 ID 를 썼다.
-        private const int TargetAssetId = 5610;
+        // 새 곡 슬롯(NewSongInjector)을 쓰면 새 곡 전용으로 등록한 AssetId 로 바뀐다 — 원곡 음원은 건드리지 않는다.
+        internal static int TargetAssetId { get; set; } = 5610;
 
         private const string FileName = "music.ogg";
 

@@ -36,9 +36,10 @@ namespace InFalsusMods
         // 목적을 달성하면 false 로 끌 것
         public static bool Enabled { get; set; } = true;
 
-        // 바꿀 곡의 자켓 머티리얼 이름. 큰 자켓 = 슬러그, 작은 자켓 = 슬러그 + "_small"
-        private const string TargetSlug = "alamode";
-        private const string SmallSuffix = "_small";
+        // 바꿀 자켓 머티리얼 이름. 기존 곡 덮어쓰기일 때는 큰 자켓 = 슬러그, 작은 자켓 = 슬러그 + "_small".
+        // 새 곡 슬롯(NewSongInjector)을 쓰면 새 곡은 자켓 항목이 없어 게임 기본 자켓(nojacket)을 쓰므로 그쪽으로 바뀐다
+        // — 원곡 자켓은 건드리지 않는다. 머티리얼이 쓰이기 전(Init 단계)에만 바꿀 것 (판정 결과를 캐시한다).
+        internal static string[] TargetMaterialNames { get; set; } = { "alamode", "alamode_small" };
 
         private const string FileName = "Thumbnail.png";
 
@@ -70,7 +71,7 @@ namespace InFalsusMods
                 var target = AccessTools.Method(typeof(Constrained2D), nameof(Constrained2D._irA));
                 var postfix = AccessTools.Method(typeof(JacketInjector), nameof(Postfix_irA));
                 harmony.Patch(target, postfix: new HarmonyMethod(postfix));
-                logger.Msg($"[JacketInjector] Constrained2D._irA 후킹 완료 (대상 자켓: '{TargetSlug}', '{TargetSlug}{SmallSuffix}' → hwa/{FileName})");
+                logger.Msg($"[JacketInjector] Constrained2D._irA 후킹 완료 (대상 자켓: {string.Join(", ", TargetMaterialNames)} → hwa/{FileName})");
             }
             catch (Exception ex)
             {
@@ -184,8 +185,7 @@ namespace InFalsusMods
                 name = name.Substring(0, name.Length - instanceSuffix.Length);
             }
 
-            return string.Equals(name, TargetSlug, StringComparison.Ordinal)
-                || string.Equals(name, TargetSlug + SmallSuffix, StringComparison.Ordinal);
+            return Array.IndexOf(TargetMaterialNames, name) >= 0;
         }
 
         private static void Replace(Material mat, Texture tex, string source)
@@ -251,7 +251,7 @@ namespace InFalsusMods
 
             var tex = new Texture2D(2, 2, TextureFormat.RGBA32, true)
             {
-                name = $"hwa_{TargetSlug}",
+                name = "hwa_jacket",
                 // 씬 전환 때 Resources.UnloadUnusedAssets 에 치이지 않게
                 hideFlags = HideFlags.DontUnloadUnusedAsset,
             };

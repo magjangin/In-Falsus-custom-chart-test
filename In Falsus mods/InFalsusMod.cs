@@ -38,6 +38,7 @@ namespace InFalsusMods
             AudioInjector.Init(HarmonyInstance, LoggerInstance);
             JacketInjector.Init(HarmonyInstance, LoggerInstance);
             VideoInjector.Init(LoggerInstance);
+            NewSongInjector.Init(LoggerInstance);
         }
 
         public override void OnUpdate()
@@ -51,6 +52,7 @@ namespace InFalsusMods
             if (_frames % DetectorIntervalFrames == 0)
             {
                 SceneRefs.Refresh(LoggerInstance);
+                NewSongInjector.Tick(LoggerInstance);   // 곡 데이터를 쓰는 다른 틱보다 먼저
                 ChartInjector.Tick(LoggerInstance);
                 NoteListDumper.Tick(LoggerInstance);
                 StorySkipUnlocker.Tick(LoggerInstance);
@@ -75,6 +77,7 @@ namespace InFalsusMods
         {
             // 플레이 중 종료 시 영상 디코더가 Unity 종료를 붙잡지 않게 먼저 끊는다
             VideoInjector.Shutdown();
+            NewSongInjector.Shutdown();   // 세이브에 새 곡 흔적(마지막 선택 곡)을 남기지 않는다
         }
 
         /// <summary>

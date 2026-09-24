@@ -28,7 +28,7 @@ namespace InFalsusMods
     /// 넣는다. VideoPlayer 가 그 시계에 맞춰 프레임을 건너뛰거나 반복한다. 게임이 멈추면 시계도 멈춰 영상이 같이 선다.
     /// 영상 소리는 끈다 — 음악은 FMOD 가 튼다(AudioInjector).
     ///
-    /// 대상은 커스텀 곡 슬롯(alamode)의 차트일 때만. 플레이 씬을 벗어나면 만든 것을 전부 지운다.
+    /// 대상은 새 곡 슬롯(hwa)의 차트일 때만. 플레이 씬을 벗어나면 만든 것을 전부 지운다.
     /// </summary>
     internal static class VideoInjector
     {
@@ -45,7 +45,8 @@ namespace InFalsusMods
         // 게임이 배경 머티리얼을 다시 꽂아서 우리가 되돌린 횟수 — 로그는 처음 몇 번만
         private const int MaxReapplyLogs = 5;
 
-        private const string TargetSlug = "alamode";
+        // 새 곡 슬롯(NewSongInjector)의 슬러그. 원곡(alamode)은 영상 없이 원래대로 둔다.
+        private const string TargetSlug = "hwa";
         private const string FileName = "video.mp4";
 
         private static MelonLogger.Instance _logger;
